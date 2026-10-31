@@ -8,6 +8,17 @@ const ui = { date: localDate(), month: localDate().slice(0, 7), fuelEdit: null, 
 const $ = (sel) => document.querySelector(sel);
 const main = $('#main');
 
+// Text size is a per-phone display preference, kept outside the data (and the backup).
+const ZOOM_KEY = 'carpool-zoom';
+const ZOOMS = [
+  { value: 1, label: 'A' },
+  { value: 1.15, label: 'A+' },
+  { value: 1.3, label: 'A++' },
+];
+const getZoom = () => Number(localStorage.getItem(ZOOM_KEY)) || 1.15;
+const applyZoom = () => (document.documentElement.style.zoom = getZoom());
+applyZoom();
+
 // ---------- helpers ----------
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -107,6 +118,12 @@ function viewHome() {
   return `<p class="muted center">Choose a topic or create a new one.</p>
   ${cards}
   <button class="btn primary block big" data-action="new-topic">+ New topic</button>
+  <div class="card text-size">
+    <span>Text size</span>
+    <div class="segmented">${ZOOMS.map(
+      (z) => `<button class="${z.value === getZoom() ? 'on' : ''}" data-action="zoom" data-zoom="${z.value}" style="font-size:${Math.round(14 * z.value)}px">${z.label}</button>`
+    ).join('')}</div>
+  </div>
   <details class="card">
     <summary>Backup &amp; restore</summary>
     <p class="muted small">All data is stored only on this phone. Export a backup now and then (e.g. to Google Drive).</p>
@@ -829,6 +846,12 @@ const actions = {
     S.topics = S.topics.filter((x) => x.id !== t.id);
     saveState(S);
     go('#/', 'replace');
+  },
+
+  zoom(el) {
+    localStorage.setItem(ZOOM_KEY, el.dataset.zoom);
+    applyZoom();
+    render();
   },
 
   // backup
