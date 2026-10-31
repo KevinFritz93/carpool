@@ -1,6 +1,6 @@
-// Offline support: serve the app from cache, refresh the cache in the background.
-// Bump CACHE when publishing a new version so old files are cleaned up.
-const CACHE = 'carpool-v1';
+// Offline support: always try the network first (so updates show up right away),
+// fall back to the cached copy when the phone is offline.
+const CACHE = 'carpool-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -27,16 +27,16 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // map/route APIs go straight to the network
+  url.search = '';
   e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(e.request, { ignoreSearch: true });
-      const fresh = fetch(e.request)
-        .then((res) => {
-          if (res.ok) cache.put(e.request, res.clone());
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fresh;
-    })
+    fetch(url, { cache: 'no-cache' })
+      .then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(url, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(url))
   );
 });
