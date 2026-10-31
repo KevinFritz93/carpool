@@ -1,9 +1,10 @@
-import { loadState, saveState, uid, localDate, newTopic, migrate, isValidState } from './store.js';
+import { loadState, saveState, uid, localDate, newTopic, parseBackup, listSnapshots, addSnapshot, currentRaw } from './store.js';
 import * as calc from './logic.js';
 import { computeRoute } from './geo.js';
+import * as cloud from './cloud.js';
 
 let S = loadState();
-const ui = { date: localDate(), month: localDate().slice(0, 7), fuelEdit: null, routeEdit: null, tripEdit: null, draft: null };
+const ui = { date: localDate(), month: localDate().slice(0, 7), fuelEdit: null, routeEdit: null, tripEdit: null, draft: null, backupOpen: false };
 
 const $ = (sel) => document.querySelector(sel);
 const main = $('#main');
@@ -59,9 +60,44 @@ const routeKm = (r, dir) => (dir === 'back' ? r.kmBack : r.kmThere);
 const defaultRoute = (t) => t.routes.find((r) => r.id === t.defaultRouteId) ?? t.routes[0];
 const findTrip = (t, id) => t.trips.find((x) => x.id === id);
 
+// Saves on the phone and (if set up) schedules the automatic cloud backup.
+function persist() {
+  try {
+    saveState(S);
+  } catch {
+    alert('Saving failed: the phone storage for this app is full. Please export a backup.');
+  }
+  scheduleCloudBackup();
+}
+
 function commit() {
-  saveState(S);
+  persist();
   render();
+}
+
+let cloudTimer;
+function scheduleCloudBackup() {
+  if (!cloud.cloudConfig()) return;
+  cloud.markPending(); // remembered in case the app is closed before the upload runs
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(runCloudBackup, 4000);
+}
+
+async function runCloudBackup() {
+  try {
+    await cloud.upload(S);
+  } catch {
+    /* error is stored in the cloud config and shown on the start screen; retried later */
+  }
+  if (current().screen === 'home') render(); // other screens may have half-filled forms
+}
+
+function replaceAllData(data, message) {
+  addSnapshot(currentRaw(), 'before restore');
+  S = data;
+  persist();
+  go('#/', 'replace');
+  alert(message);
 }
 
 // ---------- navigation ----------
@@ -124,9 +160,61 @@ function viewHome() {
       (z) => `<button class="${z.value === getZoom() ? 'on' : ''}" data-action="zoom" data-zoom="${z.value}" style="font-size:${Math.round(14 * z.value)}px">${z.label}</button>`
     ).join('')}</div>
   </div>
-  <details class="card">
-    <summary>Backup &amp; restore</summary>
-    <p class="muted small">All data is stored only on this phone. Export a backup now and then (e.g. to Google Drive).</p>
+  ${viewBackup()}`;
+}
+
+const fmtTime = (iso) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+function viewBackup() {
+  const c = cloud.cloudConfig();
+  let status;
+  if (!c) status = '<span class="warn-text">☁ Cloud backup is off</span>';
+  else if (c.error) status = '<span class="warn-text">☁ Cloud backup: not saved – tap for details</span>';
+  else status = `☁ Saved ${c.lastSync ? fmtTime(c.lastSync) : '…'}`;
+
+  const cloudPart = c
+    ? `<p class="small">${
+        c.error
+          ? `<span class="warn-text">⚠ Last attempt failed: ${esc(c.error)}. It is retried automatically.</span>`
+          : '✓ Every change is saved automatically to your GitHub account (secret gist).'
+      }<br><span class="muted">Last saved: ${c.lastSync ? fmtTime(c.lastSync) : 'not yet'}</span></p>
+      <div class="row2">
+        <button class="btn" data-action="cloud-now">Back up now</button>
+        <button class="btn" data-action="cloud-restore">Restore</button>
+      </div>
+      <button class="btn ghost small block" data-action="cloud-off">Turn off cloud backup</button>`
+    : `<p class="small">Saves every change automatically to your own GitHub account, so nothing is lost even if the
+      phone is lost, reset or Chrome data is cleared. One-time setup:</p>
+      <ol class="small steps">
+        <li><a href="${cloud.TOKEN_URL}" target="_blank" rel="noopener">Open GitHub token page</a> (sign in if asked)</li>
+        <li>Expiration: <strong>No expiration</strong> · leave only <strong>gist</strong> ticked</li>
+        <li>Tap <strong>Generate token</strong>, copy it and paste it here:</li>
+      </ol>
+      <div class="add-row">
+        <input id="cloudToken" placeholder="ghp_…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn primary" data-action="cloud-connect">Connect</button>
+      </div>`;
+
+  const snaps = listSnapshots();
+  const snapList = snaps.length
+    ? snaps
+        .map(
+          (sn, i) => `<div class="row"><span>${fmtDate(sn.date, { weekday: 'short', day: 'numeric', month: 'short' })}${
+            sn.label ? ` <span class="muted small">(${esc(sn.label)}, ${new Date(sn.time).toLocaleTimeString(undefined, { timeStyle: 'short' })})</span>` : ''
+          }</span><button class="btn ghost small" data-action="snapshot-restore" data-i="${i}">Restore</button></div>`
+        )
+        .join('')
+    : '<p class="muted small">No copies yet — they are made automatically.</p>';
+
+  return `<details class="card" data-toggle="backupOpen" ${ui.backupOpen ? 'open' : ''}>
+    <summary>Backup &amp; restore <span class="summary-status small">${status}</span></summary>
+    <h4>☁ Automatic cloud backup</h4>
+    ${cloudPart}
+    <h4>📅 Daily copies on this phone</h4>
+    <p class="muted small">Each day the app is used, the data from before that day's first change is kept (last 10 days).</p>
+    ${snapList}
+    <h4>📄 Backup file</h4>
+    <p class="muted small">Save a file e.g. to Google Drive, or move the data to another phone.</p>
     <div class="row2">
       <button class="btn" data-action="export">⬇ Export</button>
       <button class="btn" data-action="import">⬆ Import</button>
@@ -663,7 +751,7 @@ const actions = {
     t.defaultRouteId = r.id;
     t.people = d.people.map((name) => ({ id: uid(), name, archived: false }));
     S.topics.push(t);
-    saveState(S);
+    persist();
     ui.draft = null;
     openTopic(t.id, 'replace');
   },
@@ -844,7 +932,7 @@ const actions = {
     const t = topic();
     if (!confirm(`Delete “${t.name}” with all its trips and refuels? This cannot be undone.`)) return;
     S.topics = S.topics.filter((x) => x.id !== t.id);
-    saveState(S);
+    persist();
     go('#/', 'replace');
   },
 
@@ -855,13 +943,71 @@ const actions = {
   },
 
   // backup
-  export() {
-    const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
+  async export() {
+    const name = `carpool-backup-${localDate()}.json`;
+    const file = new File([JSON.stringify(S, null, 2)], name, { type: 'application/json' });
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        return await navigator.share({ files: [file], title: name }); // e.g. "Save to Drive"
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `carpool-backup-${localDate()}.json`;
+    a.href = URL.createObjectURL(file);
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  'snapshot-restore'(el) {
+    const sn = listSnapshots()[Number(el.dataset.i)];
+    if (!confirm(`Go back to the data of ${fmtDate(sn.date, { weekday: 'long', day: 'numeric', month: 'long' })}? Changes made after that are replaced (the current data is kept as an extra copy).`)) return;
+    try {
+      replaceAllData(parseBackup(sn.raw), 'Data restored.');
+    } catch (err) {
+      alert(`Restore failed: ${err.message}`);
+    }
+  },
+  async 'cloud-connect'(el) {
+    const token = $('#cloudToken').value.trim();
+    if (!token) return alert('Please paste the token first.');
+    el.disabled = true;
+    try {
+      const found = await cloud.connect(token);
+      if (found && confirm(`A cloud backup from ${fmtTime(found.updatedAt)} was found.\n\nOK = load it onto this phone (e.g. new phone).\nCancel = keep the data on this phone and overwrite the cloud backup.`)) {
+        replaceAllData(parseBackup(await cloud.download()), 'Cloud backup loaded. Automatic backup is on.');
+        return;
+      }
+      await cloud.upload(S);
+      alert('Connected. From now on every change is backed up automatically.');
+    } catch (err) {
+      alert(`Connecting failed: ${err.message}`);
+    }
+    render();
+  },
+  async 'cloud-now'(el) {
+    el.disabled = true;
+    try {
+      await cloud.upload(S);
+    } catch (err) {
+      alert(`Backup failed: ${err.message}`);
+    }
+    render();
+  },
+  async 'cloud-restore'(el) {
+    if (!confirm('Replace ALL data on this phone with the cloud backup?')) return;
+    el.disabled = true;
+    try {
+      replaceAllData(parseBackup(await cloud.download()), 'Cloud backup loaded.');
+    } catch (err) {
+      alert(`Restore failed: ${err.message}`);
+      render();
+    }
+  },
+  'cloud-off'() {
+    if (!confirm('Turn off the automatic cloud backup on this phone? The backup in your GitHub account is kept.')) return;
+    cloud.disconnect();
+    render();
   },
   import() {
     $('#importFile').click();
@@ -992,13 +1138,9 @@ $('#importFile').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file) return;
   try {
-    const data = migrate(JSON.parse(await file.text()));
-    if (!isValidState(data)) throw new Error('this is not a backup file');
+    const data = parseBackup(await file.text());
     if (!confirm('Replace ALL data on this phone with the backup?')) return;
-    S = data;
-    saveState(S);
-    go('#/', 'replace');
-    alert('Backup imported.');
+    replaceAllData(data, 'Backup imported.');
   } catch (err) {
     alert(`Import failed: ${err.message}`);
   }
@@ -1008,7 +1150,24 @@ addEventListener('popstate', () => {
   render();
 });
 
+document.addEventListener(
+  'toggle',
+  (e) => {
+    const key = e.target.dataset?.toggle;
+    if (key) ui[key] = e.target.open;
+  },
+  true
+);
+
+// Catch up on a cloud backup that didn't finish (offline, app closed) or is older than a day.
+function cloudCatchUp() {
+  const c = cloud.cloudConfig();
+  if (c && (c.pending || !c.lastSync || Date.now() - Date.parse(c.lastSync) > 864e5)) runCloudBackup();
+}
+addEventListener('online', cloudCatchUp);
+
 if (!history.state) history.replaceState({ depth: 0 }, '', location.hash || '#/');
 render();
+cloudCatchUp();
 navigator.storage?.persist?.();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');

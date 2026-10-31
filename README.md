@@ -34,7 +34,12 @@ All data stays on the phone, in the browser's local storage.
 
 **First steps:** open "Driving to work" (or create your own topic). Add the people in ⚙ Settings, including the driver, and check the tank data (40 L / 550 km) and the estimated fuel price. Then tap the names on the trips screen every day.
 
-**Backups:** the data lives only on this phone. Use **Backup & restore → Export** on the start screen regularly and save the file, for example to Google Drive. **Import** restores it, also on a new phone.
+**Your data and backups:** everything is saved on the phone immediately (in Chrome's storage for the app's address). Updates only replace the program files; the data stays and is converted automatically if its format changes. Three safety nets, all under **Backup & restore** on the start screen:
+- **Automatic cloud backup (recommended):** connect once with a GitHub token that has only the *gist* permission. After that every change is uploaded automatically to a secret gist in your GitHub account, and a backup that failed (e.g. offline) is retried later. On a new phone: connect with the same token, and the app offers to load the backup.
+- **Daily copies on the phone:** the app keeps the data from before the first change of each day (last 10 days), e.g. to undo a mistake or a faulty update.
+- **Backup file:** Export / Import a JSON file, e.g. via Google Drive.
+
+Don't rename the repository or your GitHub username. The app's address would change, and the data on the phone would only be reachable again through a backup.
 
 **Updates:** after you push changed files, the app loads the new version the next time it is opened with internet. Data on the phone is kept. When files are added or renamed, also increase `CACHE` in `sw.js` (e.g. `carpool-v3`).
 
@@ -65,4 +70,5 @@ The test settles one month of sample data. It checks that the shares add up exac
 | `js/logic.js` | Cost calculation (pure functions, tested) |
 | `js/store.js` | Data model and local storage |
 | `js/geo.js` | Automatic distance via OpenStreetMap |
+| `js/cloud.js` | Automatic cloud backup to a GitHub gist |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and Android install |

@@ -200,3 +200,9 @@ button.banner { display: block; width: 100%; cursor: pointer; }
 .segmented button:first-child { border-left: 0; }
 .segmented button.on { background: var(--accent); color: #fff; }
 @media (prefers-color-scheme: dark) { .segmented button.on { color: #042f2e; } }
+
+.summary-status { display: block; font-weight: 400; margin: 2px 0 0 18px; color: var(--muted); }
+details.card h4 { margin: 18px 0 4px; }
+.steps { margin: 6px 0; padding-left: 22px; }
+.steps li { margin: 4px 0; }
+.steps a { color: var(--accent); font-weight: 600; }

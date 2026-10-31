@@ -1,6 +1,6 @@
 // Offline support: always try the network first (so updates show up right away),
 // fall back to the cached copy when the phone is offline.
-const CACHE = 'carpool-v2';
+const CACHE = 'carpool-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   './js/logic.js',
   './js/store.js',
   './js/geo.js',
+  './js/cloud.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

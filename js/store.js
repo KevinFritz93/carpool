@@ -59,16 +59,64 @@ export function isValidState(s) {
     s.topics.every((t) => ['trips', 'fuel', 'routes', 'people'].every((k) => Array.isArray(t[k])));
 }
 
+// Parses a backup (file, snapshot or cloud copy) of any version; throws if it isn't one.
+export function parseBackup(text) {
+  const s = migrate(JSON.parse(text));
+  if (!isValidState(s)) throw new Error('this is not a carpool backup');
+  return s;
+}
+
 export function loadState() {
+  const raw = localStorage.getItem(KEY);
+  takeDailySnapshot(raw);
   try {
-    const s = migrate(JSON.parse(localStorage.getItem(KEY)));
-    if (isValidState(s)) return s;
+    return parseBackup(raw);
   } catch {
-    /* fall through to defaults */
+    return defaultState();
   }
-  return defaultState();
 }
 
 export function saveState(s) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  takeDailySnapshot(localStorage.getItem(KEY));
+  const json = JSON.stringify(s);
+  try {
+    localStorage.setItem(KEY, json);
+  } catch {
+    // Storage full: make room by dropping older snapshots, then try once more.
+    writeSnapshots(listSnapshots().slice(0, 2));
+    localStorage.setItem(KEY, json);
+  }
 }
+
+// ---------- daily snapshots ----------
+// Before the first change of each day, the stored data is copied (raw, before any migration),
+// so a bad update or a mistake can be undone by going back to an earlier day.
+
+const SNAP_KEY = 'carpool-snapshots';
+const KEEP_SNAPSHOTS = 10;
+
+export function listSnapshots() {
+  try {
+    return JSON.parse(localStorage.getItem(SNAP_KEY)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSnapshots(snaps) {
+  try {
+    localStorage.setItem(SNAP_KEY, JSON.stringify(snaps.slice(0, KEEP_SNAPSHOTS)));
+  } catch {
+    /* no room for snapshots: the data itself has priority */
+  }
+}
+
+export function addSnapshot(raw, label = '') {
+  if (raw) writeSnapshots([{ date: localDate(), time: new Date().toISOString(), label, raw }, ...listSnapshots()]);
+}
+
+function takeDailySnapshot(raw) {
+  if (raw && !listSnapshots().some((s) => s.date === localDate() && !s.label)) addSnapshot(raw);
+}
+
+export const currentRaw = () => localStorage.getItem(KEY);
